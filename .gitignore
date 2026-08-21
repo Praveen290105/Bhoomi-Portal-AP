@@ -1,0 +1,4 @@
+node_modules/
+captcha-*.png
+Assets/
+downloads/*.pdf
