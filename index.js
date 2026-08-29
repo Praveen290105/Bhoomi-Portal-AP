@@ -2,6 +2,58 @@ const { chromium } = require("playwright");
 const prompt = require("prompt-sync")();
 const path = require("path");
 const fs = require("fs");
+const Tesseract = require('tesseract.js');
+const sharp = require('sharp');
+const configPath = path.join(__dirname, 'config.json');
+let configList = [];
+if (fs.existsSync(configPath)) {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (Array.isArray(parsed)) {
+        configList = parsed;
+    } else {
+        configList = [parsed];
+        console.log("⚠️  config.json is a single object, not a list - treating it as a 1-entry list.");
+    }
+    console.log(`✓ Config loaded from config.json (${configList.length} job(s))`);
+} else {
+    console.log("⚠️ config.json not found - you'll be prompted for every value manually.");
+}
+function findDropdownOption(options, configValue) {
+    if (!configValue) return null;
+    const target = String(configValue).trim().toLowerCase();
+
+    let match = options.find(o => o.value.trim().toLowerCase() === target);
+    if (match) return match;
+
+    match = options.find(o => o.text.trim().toLowerCase() === target);
+    if (match) return match;
+
+    match = options.find(o => o.text.toLowerCase().includes(target));
+    return match || null;
+}
+
+/** Fallback used when no config value is set (or nothing matched it): first real, non-placeholder option. */
+function firstValidOption(options) {
+    return options.find(o => o.value && o.value !== "-1" && o.value !== "0" && o.text && !o.text.includes("--")) || null;
+}
+function resolveRequiredOption(options, jobValue, label) {
+    if (jobValue) {
+        const match = findDropdownOption(options, jobValue);
+        if (!match) {
+            throw new Error(
+                `${label} "${jobValue}" was not found among the available options ` +
+                `(see the table printed just above for what's actually there). Check config.json.`
+            );
+        }
+        return match;
+    }
+    const fallback = firstValidOption(options);
+    if (!fallback) {
+        throw new Error(`No valid ${label.toLowerCase()} options found`);
+    }
+    return fallback;
+}
+
 (async () => {
     const browser = await chromium.launch({
         headless: false,
@@ -50,6 +102,15 @@ const fs = require("fs");
         
         while (continueSession) {
             documentCount++;
+
+            const job = configList[documentCount - 1];
+            if (!job) {
+                throw new Error(
+                    `No entry at index ${documentCount - 1} in config.json ` +
+                    `(the list only has ${configList.length} entries). Stopping here.`
+                );
+            }
+
             console.log(`\n${"=".repeat(50)}`);
             console.log(`📄 Document #${documentCount}`);
             console.log(`${"=".repeat(50)}\n`);
@@ -107,17 +168,16 @@ const fs = require("fs");
 
             console.log("\n========== DISTRICTS ==========");
             console.table(districts);
-            const districtInput = prompt("\nEnter the District value (e.g. 22 for PALNADU): ");
-            const selectedDistrict = districts.find(d => d.value === districtInput || d.text.toLowerCase().includes(districtInput.toLowerCase()));
-            if (!selectedDistrict) {
-                throw new Error(`District not found for input: "${districtInput}"`);
-            }
-            console.log(`\nSelecting District: "${selectedDistrict.text}"...\n`);
+            // Select district for this job (by code OR name); throws if job.district is set but not found
+            let selectedDistrict = resolveRequiredOption(districts, job.district, "District");
+            console.log(`✓ Auto-selecting District: "${selectedDistrict.text}"...`);
             await page.locator("#dl_district").selectOption(selectedDistrict.value);
+            await page.waitForTimeout(500); // Wait for dropdown change to trigger
             await page.waitForFunction(() => {
                 const ddl = document.querySelector("#dl_mandal");
                 return ddl && ddl.options.length > 1;
-            });
+            }, { timeout: 10000 });
+            console.log(`✓ District selected. Mandals loaded.\n`);
             const mandals = await page.locator("#dl_mandal option").evaluateAll(options =>
                 options.map(option => ({
                     value: option.value,
@@ -125,34 +185,31 @@ const fs = require("fs");
                 }))
             );
 
-            console.log("\n========== MANDALS ==========");
+            console.log("========== MANDALS ==========");
             console.table(mandals);
-            const mandalInput = prompt("\nEnter the Mandal value (e.g. 3 for PIDUGURALLA): ");
-            const selectedMandal = mandals.find(m => m.value === mandalInput || m.text.toLowerCase().includes(mandalInput.toLowerCase()));
-            if (!selectedMandal) {
-                throw new Error(`Mandal not found for input: "${mandalInput}"`);
-            }
-            console.log(`\nSelecting Mandal: "${selectedMandal.text}"...\n`);
+            // Select mandal for this job (by code OR name); throws if job.mandal is set but not found
+            let selectedMandal = resolveRequiredOption(mandals, job.mandal, "Mandal");
+            console.log(`✓ Auto-selecting Mandal: "${selectedMandal.text}"...`);
             await page.locator("#dl_mandal").selectOption(selectedMandal.value);
+            await page.waitForTimeout(500); // Wait for dropdown change to trigger
             await page.waitForFunction(() => {
                 const ddl = document.querySelector("#dl_village");
                 return ddl && ddl.options.length > 1;
-            });
+            }, { timeout: 10000 });
+            console.log(`✓ Mandal selected. Villages loaded.\n`);
             const villages = await page.locator("#dl_village option").evaluateAll(options =>
                 options.map(option => ({
                     value: option.value,
                     text: option.textContent.trim()
                 }))
             );
-            console.log("\n========== VILLAGES ==========");
+            console.log("========== VILLAGES ==========");
             console.table(villages);
-            const villageInput = prompt("\nEnter the Village value (e.g. 2203009 for JULAKALLU): ");
-            const selectedVillage = villages.find(v => v.value === villageInput || v.text.toLowerCase().includes(villageInput.toLowerCase()));
-            if (!selectedVillage) {
-                throw new Error(`Village not found for input: "${villageInput}"`);
-            }
-            console.log(`\nSelecting Village: "${selectedVillage.text}"...`);
+            // Select village for this job (by code OR name); throws if job.village is set but not found
+            let selectedVillage = resolveRequiredOption(villages, job.village, "Village");
+            console.log(`✓ Auto-selecting Village: "${selectedVillage.text}"...`);
             await page.locator("#dl_village").selectOption(selectedVillage.value);
+            await page.waitForTimeout(500); // Wait for dropdown change to trigger
             await page.waitForLoadState("domcontentloaded");
             
             // Only need to click ROR-1B on first document if accessed via menu
@@ -178,7 +235,9 @@ const fs = require("fs");
             await page.waitForFunction(() => {
                 const ddl = document.querySelector("#dl_Pattdar");
                 return ddl && ddl.options.length > 1;
-            });
+            }, { timeout: 10000 });
+            console.log(`✓ Village selected. Pattadars loaded.\n`);
+            
             const pattadars = await page.locator("#dl_Pattdar option").evaluateAll(options =>
                 options.map(option => ({
                     value: option.value,
@@ -186,51 +245,70 @@ const fs = require("fs");
                 }))
             );
 
-            console.log("\n========== PATTADARS ==========");
+            console.log("========== PATTADARS ==========");
             pattadars.forEach((p, index) => {
                 console.log(`${index} | value = "${p.value}" | text = "${p.text}"`);
             });
-            const userInput = prompt(
-                "\nEnter the Pattadar ID shown in parentheses (e.g. 998 from 'Name (998)'), " +
-                "or type the name exactly: "
-            );
+            let selectedPattadar = resolveRequiredOption(pattadars, job.pattadar, "Pattadar");
 
-            let selectedPattadar = null;
-            const trimmedInput = userInput.trim();
-
-            if (/^\d+$/.test(trimmedInput)) {
-                selectedPattadar = pattadars.find(p => {
-                    const match = p.text.match(/\((\d+)\)\s*$/);
-                    return match && match[1] === trimmedInput;
-                });
-                if (!selectedPattadar && pattadars[Number(trimmedInput)]) {
-                    selectedPattadar = pattadars[Number(trimmedInput)];
-                }
-            } else {
-            
-                const normalize = (s) => s.replace(/\s+/g, " ").trim();
-                const target = normalize(userInput);
-
-                selectedPattadar = pattadars.find(p => normalize(p.text) === target);
-                if (!selectedPattadar) {
-                    selectedPattadar = pattadars.find(p =>
-                        normalize(p.text).toLowerCase().includes(target.toLowerCase())
-                    );
-                }
-            }
-
-            if (!selectedPattadar) {
-                throw new Error(
-                    `Could not find a matching Pattadar for input: "${userInput}". ` +
-                    `Please re-run and enter the exact INDEX number shown in the list.`
-                );
-            }
-
-            console.log(`\nSelecting Pattadar: "${selectedPattadar.text}" (value=${selectedPattadar.value})`);
+            console.log(`✓ Auto-selecting Pattadar: "${selectedPattadar.text}" (value=${selectedPattadar.value})\n`);
             await page.locator("#dl_Pattdar").selectOption({ value: selectedPattadar.value });
-            console.log("\nEnter the CAPTCHA shown in the browser.");
-            prompt("After entering CAPTCHA, press ENTER here...");
+            await page.waitForTimeout(500);
+            console.log(`✓ All dropdown selections complete!\n`);
+            // ===== CAPTCHA BLOCK =====
+            console.log("\n" + "=".repeat(50));
+            console.log("Starting CAPTCHA recognition...");
+            console.log("=".repeat(50));
+            let solved = false;
+            for (let attempt = 1; attempt <= 2; attempt++) {
+            try { 
+                    console.log(`\n🔍 CAPTCHA Attempt ${attempt}...`);
+                    console.log("\n🔍 Capturing correct CAPTCHA..."); 
+                    const captchaElement = page.locator('#m_imgCaptcha'); 
+                    await captchaElement.screenshot({ path: 'captcha.png' }); 
+                    await sharp('captcha.png') 
+                        .resize(300) 
+                        .grayscale() 
+                        .normalize() 
+                        .sharpen() 
+                        .threshold(120) 
+                        .toFile('processed.png'); 
 
+                    const { data: { text } } = await Tesseract.recognize('processed.png', 'eng'); 
+                    console.log("OCR RAW:", text); 
+
+                    // Extract number (A + A pattern) 
+                    const cleaned = text.replace(/[^0-9]/g, ''); 
+                    console.log("CLEANED:", cleaned); 
+
+                if (cleaned.length >= 2) { 
+                    const num = parseInt(cleaned.substring(0, 2)); 
+                    const answer = num * 2; 
+
+                    console.log("✅ CAPTCHA Solved:", answer); 
+
+                    await page.fill('#txt_Captch', answer.toString()); 
+                    solved = true;
+                    break;
+
+                } else { 
+                    throw new Error("OCR failed"); 
+                } 
+
+            } catch (err) { 
+
+                console.log("⚠️ Auto CAPTCHA failed, refreshing..."); 
+
+                await page.click('#refCaptcha'); // refresh captcha 
+                await page.waitForTimeout(1000);
+
+                // 👉 ONLY show manual after second failure
+                if (attempt === 2) {
+                    console.log("👉 Please enter CAPTCHA manually in browser."); 
+                    prompt("After entering CAPTCHA, press ENTER here..."); 
+                }
+            }
+        }
             console.log("\nSubmitting request...");
             const downloadPromise = page.waitForEvent("download", { timeout: 30000 }).catch(() => null);
             const newPagePromise = context.waitForEvent("page", { timeout: 30000 }).catch(() => null);
@@ -239,25 +317,46 @@ const fs = require("fs");
                 await submitBtn.scrollIntoViewIfNeeded();
                 await submitBtn.click({ timeout: 8000 });
             } catch (e) {
-                console.log("\nNormal click failed, trying to force-click through any overlay...");
+                console.log("\nNormal click failed:", e.message.split('\n')[0]);
+                console.log("Trying to force-click through any overlay...");
                 try {
                     await page.locator("#btn_submit").click({ timeout: 8000, force: true });
                 } catch (e2) {
-                    console.log("\nCouldn't click the submit button automatically.");
-                    console.log("Here are all buttons / clickable inputs currently on the page:\n");
+                    console.log("\nForce-click also failed:", e2.message.split('\n')[0]);
 
-                    const clickables = await page.locator("button, input[type=submit], input[type=button], a.btn, .btn").evaluateAll(
-                        els => els.map(el => ({
-                            tag: el.tagName,
-                            text: (el.innerText || el.value || "").trim(),
-                            id: el.id,
-                            class: el.className
-                        }))
-                    );
-                    console.table(clickables);
+                    // Last resort: bypass Playwright's actionability checks entirely
+                    // and trigger a real DOM click via the page's own JS engine.
+                    try {
+                        const clicked = await page.evaluate(() => {
+                            const btn = document.querySelector('#btn_submit');
+                            if (!btn) return false;
+                            btn.click();
+                            return true;
+                        });
+                        if (clicked) {
+                            console.log("✓ Clicked #btn_submit directly via page.evaluate().");
+                        } else {
+                            throw new Error("#btn_submit not found in DOM at all");
+                        }
+                    } catch (e3) {
+                        console.log("\nDirect DOM click also failed:", e3.message);
+                        console.log("Couldn't click the submit button automatically.");
+                        console.log("Here are all buttons / clickable inputs currently on the page:\n");
 
-                    console.log("\nPlease click the correct SUBMIT/VIEW button manually in the browser.");
-                    prompt("After clicking it, press ENTER here to continue...");
+                        const clickables = await page.locator("button, input[type=submit], input[type=button], a.btn, .btn").evaluateAll(
+                            els => els.map(el => ({
+                                tag: el.tagName,
+                                text: (el.innerText || el.value || "").trim(),
+                                id: el.id,
+                                class: el.className,
+                                disabled: el.disabled || false,
+                            }))
+                        );
+                        console.table(clickables);
+
+                        console.log("\nPlease click the correct SUBMIT/VIEW button manually in the browser.");
+                        prompt("After clicking it, press ENTER here to continue...");
+                    }
                 }
             }
 
@@ -280,9 +379,34 @@ const fs = require("fs");
                 }
             } else {
                
-                console.log("\nNo download or new tab detected — report likely rendered on the same page.");
+                console.log("\nNo download or new tab detected — checking if the report rendered on the same page...");
                 await page.waitForLoadState("networkidle").catch(() => {});
                 await page.waitForTimeout(2000);
+                const reportVisible = await page
+                    .getByText(/ROR ?-? ?1 ?b report/i)
+                    .first()
+                    .isVisible()
+                    .catch(() => false);
+                if (!reportVisible) {
+                    console.log("\n⚠️  The report did not actually render - the submission likely failed");
+                    console.log("(most often because the captcha answer was wrong, so the portal silently");
+                    console.log("rejected it without any error/download/new-tab event).");
+                    console.log("\nPlease check the captcha in the browser, correct it if needed, and click");
+                    console.log("the submit button (క్లిక్ చేయండి) yourself.");
+                    prompt("After the report is visible in the browser, press ENTER here to continue...");
+
+                    const nowVisible = await page
+                        .getByText(/ROR ?-? ?1 ?b report/i)
+                        .first()
+                        .isVisible()
+                        .catch(() => false);
+                    if (!nowVisible) {
+                        throw new Error(
+                            "Report still not visible after manual retry - skipping PDF save for this document " +
+                            "rather than saving an incorrect snapshot."
+                        );
+                    }
+                }
 
                 const pdfFrameUrl = await page.evaluate(() => {
                     const iframe = document.querySelector("iframe[src*='.pdf'], embed[src*='.pdf'], object[data*='.pdf']");
@@ -340,18 +464,22 @@ const fs = require("fs");
             } else {
                 console.log("✓ Already on ROR-1B page, no redirect needed");
             }
-            
-            // Ask if user wants another document
-            const anotherDoc = prompt("\n📋 Do you want to get another ROR-1B document? (yes/no): ").toLowerCase().trim();
-            if (anotherDoc === 'yes' || anotherDoc === 'y') {
-                continueSession = true;
-                console.log("\nNavigating to menu for next document...\n");
-            } else {
+            const hasNextJob = documentCount < configList.length;
+
+            if (!hasNextJob) {
                 continueSession = false;
-                console.log("\n👋 Closing session...");
+                console.log("\n✅ Reached the end of config.json - no more entries to process.");
+            } else {
+                const anotherDoc = prompt("\n📋 Do you want to get another ROR-1B document? (yes/no): ").toLowerCase().trim();
+                if (anotherDoc === 'yes' || anotherDoc === 'y') {
+                    continueSession = true;
+                    console.log("\nNavigating to menu for next document...\n");
+                } else {
+                    continueSession = false;
+                    console.log("\n👋 Closing session...");
+                }
             }
-        }
-        
+        } 
         console.log(`\n${"=".repeat(50)}`);
         console.log(`📊 Session Complete! Downloaded ${documentCount} document(s)`);
         console.log(`${"=".repeat(50)}\n`);
@@ -362,3 +490,4 @@ const fs = require("fs");
         await browser.close();
     }
 })();
+
