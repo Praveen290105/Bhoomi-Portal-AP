@@ -24,9 +24,10 @@ record. The build process was recon-first, not code-first:
    the page's own `<option>` elements and printed to the terminal at
    run time, so the tool works for any district/mandal/village/owner
    combination, not just the one used during testing.
-4. **Human-in-the-loop for OTP and both captchas, by design.** See
-   "Challenges" below for the reasoning — this was a deliberate
-   engineering decision, not something left incomplete.
+4. **Human-in-the-loop for OTP and login captcha.** The login screen's
+  OTP and captcha are completed in the browser. The form-page arithmetic
+  captcha uses a best-effort OCR attempt and switches to manual input if
+  OCR cannot produce a usable result.
 5. **Defensive, multi-path handling of the final report.** The portal
    was observed, across multiple runs, to return the report three
    different ways — as a real file download, in a new browser tab, or
@@ -35,10 +36,11 @@ record. The build process was recon-first, not code-first:
    of the page via Chrome DevTools Protocol (`Page.printToPDF`), so the
    tool doesn't fail just because the portal's exact output mechanism
    varies between sessions.
-6. **Session reuse across multiple documents.** Since OTP login is the
-   slowest and most manual part of the flow, the script loops and lets
-   the user pull additional ROR-1B documents in the same logged-in
-   session instead of repeating the OTP step every single time.
+6. **Configuration-driven batch jobs with session reuse.** `config.json`
+  contains the District, Mandal, Village, and Pattadar for each document.
+  The script processes those jobs in order and asks before it moves to
+  the next job, allowing one OTP-authenticated session to retrieve
+  multiple documents.
 
 ## Challenges you encountered
 
@@ -64,22 +66,20 @@ record. The build process was recon-first, not code-first:
     that exact step, and defeating it programmatically is a different
     thing entirely from automating navigation around it.
   - The **form-page captcha** (on the ROR-1B form itself) is a simple
-    two-number addition problem (e.g. `33+33=`) rendered as a distorted
-    image. This is a structurally weaker case — a tiny, fixed character
-    set of digits, `+`, and `=` — and an OCR-based solver (image
-    preprocessing plus Tesseract) was prototyped and tested against real
-    captured samples. It produced correct reads only inconsistently
-    (roughly 50-90% confidence depending on preprocessing parameters),
-    which wasn't reliable enough to trust unattended. Rather than ship a
-    partially-working auto-solver that could silently submit a wrong
-    answer, this was also left as a quick manual step — a predictable,
-    honest script beats a flaky "automated" one.
+    arithmetic image. The script captures the image, preprocesses it with
+    Sharp, and sends it to Tesseract for a best-effort attempt. The current
+    logic extracts the first two recognized digits and assumes a repeated
+    addend pattern, then enters twice that number. It refreshes the captcha
+    and retries once on recognition failure; after the second failure it
+    asks the user to enter the captcha manually in the browser. OCR output
+    can be inaccurate, so users should verify the browser state if a
+    submission is rejected.
 - **Cascading dropdowns with no fixed values.** District, Mandal,
   Village, and Pattadar options are only knowable once the previous
-  selection has loaded, so the script always queries the live
-  `<option>` elements and waits for them to actually populate
-  (`options.length > 1`) before proceeding, instead of assuming any
-  fixed set of values.
+  selection has loaded. The script queries live `<option>` elements,
+  waits for them to populate (`options.length > 1`), prints them for
+  diagnostics, and matches each configured job value by option value,
+  exact text, or text inclusion.
 - **Inconsistent report delivery.** The final report did not always
   arrive the same way between runs (download vs. new tab vs. inline),
   which is why the capture logic checks multiple paths rather than
@@ -87,39 +87,39 @@ record. The build process was recon-first, not code-first:
 
 ## Assumptions you made
 
-- A human is present and available at the keyboard for the entire run —
-  this tool is not built to run unattended or on a schedule, given the
-  OTP and captcha steps.
+- A human is present and available at the keyboard for login and any
+  failed form-captcha OCR attempt; this tool is not built to run
+  unattended or on a schedule.
 - The person running the tool is retrieving records they are legitimately
   entitled to access — via their own registered mobile number, the same
   access a citizen already has by using the portal manually themselves.
-- District/Mandal/Village/Pattadar are selected per run via terminal
-  prompts against live-fetched lists, rather than pre-configured in a
-  file — trading a little convenience for always being correct against
-  whatever the portal currently offers, since these lists (and their
-  underlying values) are not guaranteed stable over time.
+- `config.json` contains an array of jobs. Each job supplies `district`,
+  `mandal`, `village`, and `pattadar`; these values are checked against
+  live-fetched portal options before selection. A missing value falls back
+  to the first non-placeholder option, while a supplied but unmatched
+  value stops the run with an error.
+- Google Chrome is installed locally. Playwright launches it using the
+  `chrome` channel rather than a Playwright-downloaded browser build.
 
 ## Limitations and future improvements
 
-- **OTP login and both captchas require manual action every run.** This
-  is intentional for the login captcha; for the arithmetic captcha, it's
-  a practical compromise pending a more reliable OCR pipeline (see
-  below).
-- **Arithmetic-captcha OCR is not production-ready yet**, but the
-  groundwork suggests it's solvable: the prototype (image preprocessing
-  with Jimp + Tesseract.js) confirmed the problem is *tractable* — a
-  small, fixed character set on a fairly consistent background — but
-  would need further work (e.g. per-character segmentation instead of
-  whole-line OCR, or a small custom-trained classifier, given how
-  constrained the character set is) before it should run unattended.
+- **OTP login and the login captcha require manual action every run.**
+  The form captcha is attempted automatically but can still require manual
+  entry when OCR fails.
+- **Arithmetic-captcha OCR is heuristic.** It recognizes an image after
+  resize, grayscale, normalization, sharpening, and thresholding. The
+  current parser only supports the repeated-addend pattern it expects; a
+  changed captcha format or inaccurate OCR can lead to a rejected form,
+  which the script reports and hands back to the user for manual retry.
 - **No automated retries/backoff** for transient network failures beyond
-  the timeouts already built into individual `waitFor` calls.
+  the timeouts already built into individual `waitFor` calls. Only
+  form-captcha OCR gets a second attempt after a refresh.
 - **No automated test suite.** The live form is both OTP- and
   captcha-gated, which makes conventional CI testing impractical;
   verification has been manual, against the real, live portal.
 - **Selectors are tied to the portal's current markup** (element IDs
-  like `#dl_district`, `#dl_Pattdar`, `#btn_submit`) as observed in
-  August 2026. Government portals can change without notice, so these
-  may need revisiting if the site is updated.
+  like `#dl_district`, `#dl_Pattdar`, `#m_imgCaptcha`, and `#btn_submit`)
+  as observed in August 2026. Government portals can change without
+  notice, so these may need revisiting if the site is updated.
 - If the portal ever exposes a documented/official API or a bulk-export
   facility, that should be preferred over UI automation entirely.
