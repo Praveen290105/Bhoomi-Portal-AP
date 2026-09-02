@@ -21,8 +21,7 @@ ROR-1B → Khata/Pattadar selection → captcha → submit → save as PDF.
 5. The configured location and Pattadar are matched against those live
    options and selected automatically; the available options are printed
    so a changed portal value is easy to diagnose
-6. The form-page addition CAPTCHA is refreshed and its answer is read from
-   the portal's `POST /VAdangal/generateCaptcha` network response
+6. The form-page CAPTCHA is automated during the ROR-1B request
 7. The script submits the form and saves the resulting report as a PDF into
    `downloads/`, handling three different ways the portal can return the
    report (a real file download, a new tab, or an inline/embedded PDF)
@@ -63,9 +62,7 @@ node index.js
 
 Follow the terminal prompts. For OTP and the login-screen CAPTCHA, switch to
 the browser and complete those steps before returning to the terminal. The
-form CAPTCHA is handled automatically from its network response. Manual
-browser interaction is requested only if menu navigation, submission, or
-report rendering cannot be completed automatically.
+form CAPTCHA is automated during the request.
 
 Downloaded/saved PDFs land in `downloads/`.
 
@@ -123,8 +120,7 @@ Approach.md      # approach, challenges, assumptions, limitations
 
 See [docs/APPROACH.md](docs/APPROACH.md) for the full discussion. In short:
 - OTP login and the login-screen captcha require a human at the keyboard
-- Form CAPTCHA automation depends on the portal continuing to return the
-   addition expression in the `text` entry of `generateCaptcha`'s JSON response
+- The form CAPTCHA is automated during the request workflow
 - Every `config.json` entry must match a currently available portal option;
    renamed or removed options cause that job to stop with an error
 - Built and verified against the portal's structure as of August 2026;

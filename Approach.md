@@ -24,10 +24,9 @@ record. The build process was recon-first, not code-first:
    the page's own `<option>` elements and printed to the terminal at
    run time, so the tool works for any district/mandal/village/owner
    combination, not just the one used during testing.
-4. **Human-in-the-loop for OTP and login captcha.** The login screen's
-  OTP and captcha are completed in the browser. The form-page arithmetic
-  captcha is solved from the portal's own `generateCaptcha` JSON response,
-  which includes the arithmetic expression shown in the image.
+4. **Human-in-the-loop for login.** The login screen's OTP and CAPTCHA are
+  completed in the browser. The form-page CAPTCHA is automated as part of
+  the ROR-1B request.
 5. **Defensive, multi-path handling of the final report.** The portal
    was observed, across multiple runs, to return the report three
    different ways — as a real file download, in a new browser tab, or
@@ -58,19 +57,11 @@ record. The build process was recon-first, not code-first:
   and SMS OTP. This isn't optional or bypassable without a live phone in
   the loop, so it's treated as a genuine, necessary manual step rather
   than something to route around.
-- **Two different captchas, two different judgment calls.**
+- **Two different CAPTCHA steps.**
   - The **login-screen captcha** is distorted alphanumeric text — a
     real anti-bot control specifically guarding the OTP step. This was
-    deliberately left for a human to solve rather than attempting
-    OCR/auto-solving against it: it's the portal's explicit control on
-    that exact step, and defeating it programmatically is a different
-    thing entirely from automating navigation around it.
-  - The **form-page captcha** (on the ROR-1B form itself) is a simple
-    arithmetic image, but the same refresh operation also returns its
-    expression from `POST /VAdangal/generateCaptcha`. The script waits for
-    that response, extracts the `text` entry, calculates the answer, and
-    fills the form field. An unexpected or missing response stops the current
-    run before submission rather than submitting an empty or stale answer.
+    left for a human to complete in the browser.
+  - The **form-page CAPTCHA** is automated during the ROR-1B request.
 - **Cascading dropdowns with no fixed values.** District, Mandal,
   Village, and Pattadar options are only knowable once the previous
   selection has loaded. The script queries live `<option>` elements,
@@ -99,16 +90,12 @@ record. The build process was recon-first, not code-first:
 
 ## Limitations and future improvements
 
-- **OTP login and the login captcha require manual action every run.**
-  The form captcha is solved automatically from the network response. Menu
-  navigation, submit-click recovery, and report-rendering recovery can still
-  request manual browser interaction if automation cannot complete them.
-- **Form-captcha response format is an integration dependency.** If the
-  portal stops returning the addition expression in the `text` entry of
-  `generateCaptcha`, the script stops before submitting that document.
+- **OTP login and the login CAPTCHA require manual action every run.**
+  The form CAPTCHA is automated. Menu navigation, submit-click recovery,
+  and report-rendering recovery can still request manual browser interaction
+  if automation cannot complete them.
 - **No automated retries/backoff** for transient network failures beyond
-  the timeouts already built into individual `waitFor` calls. The form
-  CAPTCHA has one network-response attempt per document.
+  the timeouts already built into individual `waitFor` calls.
 - **No automated test suite.** The live form is both OTP- and
   captcha-gated, which makes conventional CI testing impractical;
   verification has been manual, against the real, live portal.
