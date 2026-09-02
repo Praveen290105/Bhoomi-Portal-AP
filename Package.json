@@ -12,8 +12,6 @@
   "type": "commonjs",
   "dependencies": {
     "playwright": "^1.62.1",
-    "prompt-sync": "^4.2.0",
-    "sharp": "^0.35.3",
-    "tesseract.js": "^7.0.0"
+    "prompt-sync": "^4.2.0"
   }
 }

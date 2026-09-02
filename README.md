@@ -21,10 +21,9 @@ ROR-1B → Khata/Pattadar selection → captcha → submit → save as PDF.
 5. The configured location and Pattadar are matched against those live
    options and selected automatically; the available options are printed
    so a changed portal value is easy to diagnose
-6. The form-page arithmetic captcha is captured and OCR is attempted up to
-   twice. If OCR fails, the captcha is refreshed and you enter it manually
-   in the browser before continuing
-7. Script submits the form and saves the resulting report as a PDF into
+6. The form-page addition CAPTCHA is refreshed and its answer is read from
+   the portal's `POST /VAdangal/generateCaptcha` network response
+7. The script submits the form and saves the resulting report as a PDF into
    `downloads/`, handling three different ways the portal can return the
    report (a real file download, a new tab, or an inline/embedded PDF)
 8. Asks before starting the next configured job, reusing the logged-in
@@ -62,10 +61,11 @@ loaded from the live portal, not against a hardcoded list.
 node index.js
 ```
 
-Follow the terminal prompts. Whenever the script asks you to act **in the
-browser window** (OTP, login captcha, or a form captcha that OCR could not
-read), switch to it, complete that step, then return to the terminal to
-continue.
+Follow the terminal prompts. For OTP and the login-screen CAPTCHA, switch to
+the browser and complete those steps before returning to the terminal. The
+form CAPTCHA is handled automatically from its network response. Manual
+browser interaction is requested only if menu navigation, submission, or
+report rendering cannot be completed automatically.
 
 Downloaded/saved PDFs land in `downloads/`.
 
@@ -101,9 +101,8 @@ Auto-selecting Village: "JULAKALLU"...
 ...live options printed here...
 Auto-selecting Pattadar: "... (1983)"...
 
-Starting CAPTCHA recognition...
-CAPTCHA Attempt 1...
-CAPTCHA Solved: 66
+CAPTCHA: 33+33 =
+CAPTCHA answer: 66
 
 Submitting request...
 Report downloaded successfully to: downloads/ROR1B_....pdf
@@ -124,8 +123,8 @@ Approach.md      # approach, challenges, assumptions, limitations
 
 See [docs/APPROACH.md](docs/APPROACH.md) for the full discussion. In short:
 - OTP login and the login-screen captcha require a human at the keyboard
-- Form captcha OCR can fail; when it does, a human must enter the captcha
-   manually in the browser
+- Form CAPTCHA automation depends on the portal continuing to return the
+   addition expression in the `text` entry of `generateCaptcha`'s JSON response
 - Every `config.json` entry must match a currently available portal option;
    renamed or removed options cause that job to stop with an error
 - Built and verified against the portal's structure as of August 2026;

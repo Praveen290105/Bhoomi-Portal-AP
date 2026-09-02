@@ -2,8 +2,6 @@
     const prompt = require("prompt-sync")();
     const path = require("path");
     const fs = require("fs");
-    const Tesseract = require('tesseract.js');
-    const sharp = require('sharp');
     const configPath = path.join(__dirname, 'config.json');
     let configList = [];
     if (fs.existsSync(configPath)) {
@@ -138,7 +136,7 @@
                             waitUntil: "networkidle"
                         });
                     }
-                } catch (e) {
+                } catch {
                     if (documentCount === 1) {
                         console.log("⚠️  Menu click failed. Here are available list items:");
                         const listItems = await page.locator("li").evaluateAll(els =>
@@ -165,7 +163,7 @@
                 console.log("\n========== DISTRICTS ==========");
                 console.table(districts);
                 // Select district for this job (by code OR name); throws if job.district is set but not found
-                let selectedDistrict = resolveRequiredOption(districts, job.district, "District");
+                const selectedDistrict = resolveRequiredOption(districts, job.district, "District");
                 console.log(`✓ Auto-selecting District: "${selectedDistrict.text}"...`);
                 await page.locator("#dl_district").selectOption(selectedDistrict.value);
                 await page.waitForTimeout(500); // Wait for dropdown change to trigger
@@ -184,7 +182,7 @@
                 console.log("========== MANDALS ==========");
                 console.table(mandals);
                 // Select mandal for this job (by code OR name); throws if job.mandal is set but not found
-                let selectedMandal = resolveRequiredOption(mandals, job.mandal, "Mandal");
+                const selectedMandal = resolveRequiredOption(mandals, job.mandal, "Mandal");
                 console.log(`✓ Auto-selecting Mandal: "${selectedMandal.text}"...`);
                 await page.locator("#dl_mandal").selectOption(selectedMandal.value);
                 await page.waitForTimeout(500); // Wait for dropdown change to trigger
@@ -202,7 +200,7 @@
                 console.log("========== VILLAGES ==========");
                 console.table(villages);
                 // Select village for this job (by code OR name); throws if job.village is set but not found
-                let selectedVillage = resolveRequiredOption(villages, job.village, "Village");
+                const selectedVillage = resolveRequiredOption(villages, job.village, "Village");
                 console.log(`✓ Auto-selecting Village: "${selectedVillage.text}"...`);
                 await page.locator("#dl_village").selectOption(selectedVillage.value);
                 await page.waitForTimeout(500); // Wait for dropdown change to trigger
@@ -224,7 +222,7 @@
                     await page.locator("#lblkhata").waitFor({ timeout: 5000 });
                     console.log("Selecting Khata...");
                     await page.locator("#lblkhata").click();
-                } catch (e) {
+                } catch {
                     console.log("✓ Khata already selected");
                 }
                 
@@ -245,66 +243,36 @@
                 pattadars.forEach((p, index) => {
                     console.log(`${index} | value = "${p.value}" | text = "${p.text}"`);
                 });
-                let selectedPattadar = resolveRequiredOption(pattadars, job.pattadar, "Pattadar");
+                const selectedPattadar = resolveRequiredOption(pattadars, job.pattadar, "Pattadar");
 
                 console.log(`✓ Auto-selecting Pattadar: "${selectedPattadar.text}" (value=${selectedPattadar.value})\n`);
                 await page.locator("#dl_Pattdar").selectOption({ value: selectedPattadar.value });
                 await page.waitForTimeout(500);
                 console.log(`✓ All dropdown selections complete!\n`);
-                // ===== CAPTCHA BLOCK =====
-                console.log("\n" + "=".repeat(50));
-                console.log("Starting CAPTCHA recognition...");
-                console.log("=".repeat(50));
-                let solved = false;
-                for (let attempt = 1; attempt <= 2; attempt++) {
-                try { 
-                        console.log(`\n🔍 CAPTCHA Attempt ${attempt}...`);
-                        console.log("\n🔍 Capturing correct CAPTCHA..."); 
-                        const captchaElement = page.locator('#m_imgCaptcha'); 
-                        await captchaElement.screenshot({ path: 'captcha.png' }); 
-                        await sharp('captcha.png') 
-                            .resize(300) 
-                            .grayscale() 
-                            .normalize() 
-                            .sharpen() 
-                            .threshold(120) 
-                            .toFile('processed.png'); 
+                const captchaResponsePromise = page.waitForResponse(response =>
+                    response.url().includes('/VAdangal/generateCaptcha') &&
+                    response.request().method() === 'POST',
+                    { timeout: 15000 }
+                );
+                await page.locator('#refCaptcha').click();
+                const captchaResponse = await captchaResponsePromise;
+                const captchaPayload = await captchaResponse.json();
+                const captchaText = captchaPayload.find(entry =>
+                    String(entry.Key).toLowerCase() === 'text'
+                )?.Value;
+                const expression = String(captchaText || '').match(/(\d+)\s*\+\s*(\d+)/);
 
-                        const { data: { text } } = await Tesseract.recognize('processed.png', 'eng'); 
-                        console.log("OCR RAW:", text); 
-
-                        // Extract number (A + A pattern) 
-                        const cleaned = text.replace(/[^0-9]/g, ''); 
-                        console.log("CLEANED:", cleaned); 
-
-                    if (cleaned.length >= 2) { 
-                        const num = parseInt(cleaned.substring(0, 2)); 
-                        const answer = num * 2; 
-
-                        console.log("✅ CAPTCHA Solved:", answer); 
-
-                        await page.fill('#txt_Captch', answer.toString()); 
-                        solved = true;
-                        break;
-
-                    } else { 
-                        throw new Error("OCR failed"); 
-                    } 
-
-                } catch (err) { 
-
-                    console.log("⚠️ Auto CAPTCHA failed, refreshing..."); 
-
-                    await page.click('#refCaptcha'); // refresh captcha 
-                    await page.waitForTimeout(1000);
-
-                    // 👉 ONLY show manual after second failure
-                    if (attempt === 2) {
-                        console.log("👉 Please enter CAPTCHA manually in browser."); 
-                        prompt("After entering CAPTCHA, press ENTER here..."); 
-                    }
+                if (!expression) {
+                    throw new Error(`Unexpected CAPTCHA text: ${captchaText}`);
                 }
-            }
+
+                const left = Number(expression[1]);
+                const right = Number(expression[2]);
+                const answer = left + right;
+
+                console.log(`CAPTCHA: ${captchaText}`);
+                console.log("CAPTCHA answer:", answer);
+                await page.fill('#txt_Captch', answer.toString());
                 console.log("\nSubmitting request...");
                 const downloadPromise = page.waitForEvent("download", { timeout: 30000 }).catch(() => null);
                 const newPagePromise = context.waitForEvent("page", { timeout: 30000 }).catch(() => null);
@@ -370,7 +338,7 @@
                         const pdfPath = path.join(downloadDir, `ROR1B_${Date.now()}.pdf`);
                         await savePageAsPDF(newPage, pdfPath);
                         console.log(`✅ Also saved a PDF copy to: ${pdfPath}`);
-                    } catch (pdfErr) {
+                    } catch {
                         console.log("Could not auto-save PDF from the new tab (this is fine if it already downloaded).");
                     }
                 } else {
@@ -416,7 +384,7 @@
                             const pdfPath = path.join(downloadDir, `ROR1B_${Date.now()}.pdf`);
                             fs.writeFileSync(pdfPath, await pdfResponse.body());
                             console.log(`✅ Report PDF saved to: ${pdfPath}`);
-                        } catch (fetchErr) {
+                        } catch {
                             console.log("Could not fetch the embedded PDF directly, falling back to page snapshot.");
                             const pdfPath = path.join(downloadDir, `ROR1B_${Date.now()}.pdf`);
                             await savePageAsPDF(page, pdfPath);
@@ -454,7 +422,7 @@
                             await ror1bTab.click();
                             await page.waitForLoadState("domcontentloaded");
                         }
-                    } catch (e) {
+                    } catch {
                         console.log("⚠️  Could not auto-select ROR-1B, continuing...");
                     }
                 } else {

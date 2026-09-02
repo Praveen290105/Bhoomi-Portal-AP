@@ -26,8 +26,8 @@ record. The build process was recon-first, not code-first:
    combination, not just the one used during testing.
 4. **Human-in-the-loop for OTP and login captcha.** The login screen's
   OTP and captcha are completed in the browser. The form-page arithmetic
-  captcha uses a best-effort OCR attempt and switches to manual input if
-  OCR cannot produce a usable result.
+  captcha is solved from the portal's own `generateCaptcha` JSON response,
+  which includes the arithmetic expression shown in the image.
 5. **Defensive, multi-path handling of the final report.** The portal
    was observed, across multiple runs, to return the report three
    different ways — as a real file download, in a new browser tab, or
@@ -66,14 +66,11 @@ record. The build process was recon-first, not code-first:
     that exact step, and defeating it programmatically is a different
     thing entirely from automating navigation around it.
   - The **form-page captcha** (on the ROR-1B form itself) is a simple
-    arithmetic image. The script captures the image, preprocesses it with
-    Sharp, and sends it to Tesseract for a best-effort attempt. The current
-    logic extracts the first two recognized digits and assumes a repeated
-    addend pattern, then enters twice that number. It refreshes the captcha
-    and retries once on recognition failure; after the second failure it
-    asks the user to enter the captcha manually in the browser. OCR output
-    can be inaccurate, so users should verify the browser state if a
-    submission is rejected.
+    arithmetic image, but the same refresh operation also returns its
+    expression from `POST /VAdangal/generateCaptcha`. The script waits for
+    that response, extracts the `text` entry, calculates the answer, and
+    fills the form field. An unexpected or missing response stops the current
+    run before submission rather than submitting an empty or stale answer.
 - **Cascading dropdowns with no fixed values.** District, Mandal,
   Village, and Pattadar options are only knowable once the previous
   selection has loaded. The script queries live `<option>` elements,
@@ -87,9 +84,8 @@ record. The build process was recon-first, not code-first:
 
 ## Assumptions you made
 
-- A human is present and available at the keyboard for login and any
-  failed form-captcha OCR attempt; this tool is not built to run
-  unattended or on a schedule.
+- A human is present and available at the keyboard for login; this tool is
+  not built to run unattended or on a schedule.
 - The person running the tool is retrieving records they are legitimately
   entitled to access — via their own registered mobile number, the same
   access a citizen already has by using the portal manually themselves.
@@ -104,21 +100,20 @@ record. The build process was recon-first, not code-first:
 ## Limitations and future improvements
 
 - **OTP login and the login captcha require manual action every run.**
-  The form captcha is attempted automatically but can still require manual
-  entry when OCR fails.
-- **Arithmetic-captcha OCR is heuristic.** It recognizes an image after
-  resize, grayscale, normalization, sharpening, and thresholding. The
-  current parser only supports the repeated-addend pattern it expects; a
-  changed captcha format or inaccurate OCR can lead to a rejected form,
-  which the script reports and hands back to the user for manual retry.
+  The form captcha is solved automatically from the network response. Menu
+  navigation, submit-click recovery, and report-rendering recovery can still
+  request manual browser interaction if automation cannot complete them.
+- **Form-captcha response format is an integration dependency.** If the
+  portal stops returning the addition expression in the `text` entry of
+  `generateCaptcha`, the script stops before submitting that document.
 - **No automated retries/backoff** for transient network failures beyond
-  the timeouts already built into individual `waitFor` calls. Only
-  form-captcha OCR gets a second attempt after a refresh.
+  the timeouts already built into individual `waitFor` calls. The form
+  CAPTCHA has one network-response attempt per document.
 - **No automated test suite.** The live form is both OTP- and
   captcha-gated, which makes conventional CI testing impractical;
   verification has been manual, against the real, live portal.
 - **Selectors are tied to the portal's current markup** (element IDs
-  like `#dl_district`, `#dl_Pattdar`, `#m_imgCaptcha`, and `#btn_submit`)
+  like `#dl_district`, `#dl_Pattdar`, `#refCaptcha`, and `#btn_submit`)
   as observed in August 2026. Government portals can change without
   notice, so these may need revisiting if the site is updated.
 - If the portal ever exposes a documented/official API or a bulk-export
